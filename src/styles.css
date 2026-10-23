@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #07080d;
+  --color-surface: #16181f;
+  --color-fg: #f4f0e8;
+  --color-muted: #a39c90;
+  --color-primary: #ff8a1e;
+  --color-ghost: #7eb6ff;
+  --font-display: "Oswald", "Arial Narrow", Impact, sans-serif;
+  --font-sans: "Sora", system-ui, sans-serif;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Phone HUD sits above the thumb deck. A width breakpoint hides that deck
+   in landscape, so this follows the pointer instead. */
+.race-readout {
+  padding-bottom: 1rem;
+}
+
+@media (pointer: coarse) {
+  .race-readout {
+    padding-bottom: calc(9.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin-slow {
+    animation: none;
+  }
+}
