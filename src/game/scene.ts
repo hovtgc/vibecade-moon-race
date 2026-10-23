@@ -19,7 +19,7 @@ export type World = {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   player: TruckView;
-  rival: TruckView;
+  field: TruckView[];
   dust: Dust;
   jugs: JugNode[];
   look: THREE.Vector3;
@@ -183,38 +183,38 @@ function packBed(body: THREE.Group) {
   return slots;
 }
 
-function createTruck(ghost: boolean): TruckView {
+const PAINT = [0xe7e2d8, 0x7eb6ff, 0xff8a1e, 0xe85d4c, 0x5dbe8a, 0xc39bd3, 0xf4d03f, 0x5dade2];
+
+function createTruck(paint: number, lit: boolean): TruckView {
   const root = new THREE.Group();
   const body = new THREE.Group();
   body.position.y = 0.42;
   const shell = new THREE.MeshStandardMaterial({
-    color: ghost ? 0x7eb6ff : 0xe7e2d8,
-    metalness: ghost ? 0.2 : 0.92,
-    roughness: ghost ? 0.35 : 0.22,
-    transparent: ghost,
-    opacity: ghost ? 0.45 : 1,
+    color: PAINT[paint] ?? 0xe7e2d8,
+    metalness: 0.9,
+    roughness: 0.24,
     side: THREE.DoubleSide,
   });
   const glass = new THREE.MeshStandardMaterial({
-    color: ghost ? 0x123044 : 0x10141c,
+    color: 0x10141c,
     metalness: 0.55,
     roughness: 0.08,
     transparent: true,
-    opacity: ghost ? 0.3 : 0.82,
+    opacity: 0.82,
   });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.94, metalness: 0.04 });
   const lamps = new THREE.MeshStandardMaterial({
     color: 0xff8a1e,
     emissive: 0xff8a1e,
-    emissiveIntensity: ghost ? 0.45 : 1.8,
+    emissiveIntensity: 1.6,
   });
   const tail = new THREE.MeshStandardMaterial({
     color: 0xff3b2f,
     emissive: 0xff2a22,
-    emissiveIntensity: ghost ? 0.3 : 1.5,
+    emissiveIntensity: 1.4,
   });
   const dark = new THREE.MeshStandardMaterial({ color: 0x23262c, metalness: 0.7, roughness: 0.38 });
-  const shadow = !ghost;
+  const shadow = lit;
 
   const hull = prism(
     [
@@ -288,7 +288,7 @@ function createTruck(ghost: boolean): TruckView {
     if (front) fronts.push(pivot);
   }
   root.add(body);
-  if (!ghost) {
+  if (lit) {
     const glow = new THREE.PointLight(0xff8a1e, 6, 14, 2);
     glow.position.set(0, 1.6, 2.6);
     root.add(glow);
@@ -679,10 +679,13 @@ export function createWorld(track: Track, canvasHost: HTMLElement): World {
     scene.add(mesh);
   }
 
-  const player = createTruck(false);
-  const rival = createTruck(true);
-  rival.root.visible = false;
-  scene.add(player.root, rival.root);
+  const player = createTruck(0, true);
+  const field = [1, 2, 3, 4, 5, 6, 7].map((paint) => {
+    const truck = createTruck(paint, false);
+    truck.root.visible = false;
+    return truck;
+  });
+  scene.add(player.root, ...field.map((truck) => truck.root));
   const dust = makeDust();
   scene.add(dust.points);
   const jugs: JugNode[] = track.jugs.map((jug) => {
@@ -698,7 +701,7 @@ export function createWorld(track: Track, canvasHost: HTMLElement): World {
     scene,
     camera,
     player,
-    rival,
+    field,
     dust,
     jugs,
     look: new THREE.Vector3(),
@@ -745,7 +748,23 @@ function puff(dust: Dust, x: number, y: number, z: number, speed: number) {
   dust.vel[i * 3 + 2] = (Math.random() - 0.5) * 3 - Math.sign(speed) * 0.3;
 }
 
-export function updateWorld(world: World, sim: Sim, dt: number, mode: "orbit" | "chase", ghost: GhostPose | null, reduce: boolean) {
+export type FieldPose = {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  steer: number;
+  speed: number;
+};
+
+export function updateWorld(
+  world: World,
+  sim: Sim,
+  dt: number,
+  mode: "orbit" | "chase",
+  field: Array<FieldPose | null>,
+  reduce: boolean,
+) {
   world.clock += dt;
   const p = sim.player;
   const squash = p.impact > 4 ? -0.12 : Math.sin(world.clock * Math.min(22, 6 + Math.abs(p.speed))) * 0.035;
@@ -781,19 +800,15 @@ export function updateWorld(world: World, sim: Sim, dt: number, mode: "orbit" | 
     world.player.bedJugs[i]!.visible = i < loaded;
   }
 
-  const rival = sim.bot;
-  if (rival) {
-    world.rival.root.visible = true;
-    placeTruck(world.rival, rival.x, rival.y, rival.z, rival.yaw, rival.steer, rival.speed, dt, 0);
-  } else if (ghost) {
-    world.rival.root.visible = true;
-    const g = world.rival.root.position;
-    const k = 1 - Math.exp(-10 * dt);
-    g.x += (ghost.x - g.x) * k;
-    g.y += (ghost.y - g.y) * k;
-    g.z += (ghost.z - g.z) * k;
-    yawQuat(ghost.yaw, _q);
-    world.rival.root.quaternion.slerp(_q, k);
+  for (let i = 0; i < world.field.length; i++) {
+    const view = world.field[i]!;
+    const pose = field[i];
+    if (!pose) {
+      view.root.visible = false;
+      continue;
+    }
+    view.root.visible = true;
+    placeTruck(view, pose.x, pose.y, pose.z, pose.yaw, pose.steer, pose.speed, dt, 0);
   }
 
   if (p.onGround && Math.abs(p.speed) > 6) {

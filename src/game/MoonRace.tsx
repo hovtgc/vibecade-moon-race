@@ -4,7 +4,7 @@ import { Droplets, Flag, Gauge, RotateCcw, Timer, Zap } from "lucide-react";
 import * as THREE from "three";
 import { createAudio } from "./audio";
 import { isRealHost, openSession } from "./session";
-import { createWorld, updateWorld, type GhostPose, type World } from "./scene";
+import { createWorld, updateWorld, type FieldPose, type World } from "./scene";
 import { createSim, formatTime, KeyInput, scoreOf, stepSim, type Sim } from "./sim";
 import { buildTrack, querySurface } from "./track";
 import "./probe";
@@ -77,10 +77,14 @@ async function settle(client: VibeCadeClient | null, sim: Sim): Promise<ResultCa
     } catch {
       filed.note = "VibeCade did not take the time. It is still saved here.";
     }
-    if (client.opponent?.isBot && sim.bot) {
-      const botScore = sim.bot.finished ? Math.round(Math.max(1, sim.bot.finishTime) * 1000) : 210000;
+    const bots = client.players.filter((p) => p.isBot);
+    for (let i = 0; i < sim.bots.length; i++) {
+      const bot = sim.bots[i]!;
+      const id = bots[i]?.id;
+      if (!id) continue;
+      const botScore = bot.finished ? Math.round(Math.max(1, bot.finishTime) * 1000) : 420000;
       try {
-        await client.submitFor(client.opponent.id, {
+        await client.submitFor(id, {
           score: botScore,
           display: { kind: "text", title: formatTime(botScore), body: "Pace truck" },
         });
@@ -101,8 +105,14 @@ async function settle(client: VibeCadeClient | null, sim: Sim): Promise<ResultCa
     if (cleared) ids.push("finish");
     if (cleared && sim.player.resets === 0) ids.push("clean");
     if (sim.player.airTotal >= 4) ids.push("air");
-    if (cleared && sim.player.finishTime > 0 && sim.player.finishTime < 70) ids.push("sub70");
-    if (cleared && sim.bot?.finished && sim.player.finishTime < sim.bot.finishTime) ids.push("beatbot");
+    if (cleared && sim.player.finishTime > 0 && sim.player.finishTime < 150) ids.push("sub70");
+    if (
+      cleared &&
+      sim.bots.length > 0 &&
+      sim.bots.every((bot) => bot.finished && sim.player.finishTime < bot.finishTime)
+    ) {
+      ids.push("beatbot");
+    }
     if (sim.player.boosts >= 3) ids.push("boosts");
     for (const id of ids) {
       try {
@@ -214,7 +224,7 @@ export function MoonRace() {
     let submitted = false;
     let acc = 0;
     let poseT = 0;
-    let ghost: GhostPose | null = null;
+    let ghost = new Map<string, FieldPose & { tx: number; ty: number; tz: number; tyaw: number; seen: number }>();
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const timer = new THREE.Timer();
     timer.connect(document);
@@ -332,7 +342,29 @@ export function MoonRace() {
           callout = "BOOST";
           calloutT = 0.55;
         }
-        updateWorld(world, sim, dt || 0.016, racing ? "chase" : "orbit", sim.bot ? null : ghost, reduce);
+        const poses: Array<FieldPose | null> = [null, null, null, null, null, null, null];
+        let slot = 0;
+        for (const bot of sim.bots) {
+          if (slot >= poses.length) break;
+          poses[slot] = { x: bot.x, y: bot.y, z: bot.z, yaw: bot.yaw, steer: bot.steer, speed: bot.speed };
+          slot += 1;
+        }
+        const blend = 1 - Math.exp(-10 * (dt || 0.016));
+        const now = performance.now();
+        for (const pose of ghost.values()) {
+          if (now - pose.seen > 4000) continue;
+          pose.x += (pose.tx - pose.x) * blend;
+          pose.y += (pose.ty - pose.y) * blend;
+          pose.z += (pose.tz - pose.z) * blend;
+          let dy = pose.tyaw - pose.yaw;
+          while (dy > Math.PI) dy -= Math.PI * 2;
+          while (dy < -Math.PI) dy += Math.PI * 2;
+          pose.yaw += dy * blend;
+          if (slot >= poses.length) continue;
+          poses[slot] = pose;
+          slot += 1;
+        }
+        updateWorld(world, sim, dt || 0.016, racing ? "chase" : "orbit", poses, reduce);
         audio.update(sim.player.speed, sim.player.boost);
         if (sim.player.impact > 3) audio.impact(sim.player.impact);
         if (sim.player.justBoost) audio.boost();
@@ -407,24 +439,45 @@ export function MoonRace() {
         if (dead) return;
         real = isRealHost(client);
         const track = buildTrack(client.match.seed, client.random.fork("stage"));
-        const withBot = Boolean(client.opponent?.isBot) && !client.isSpectator;
-        sim = createSim(track, withBot);
+        const bots = client.players.filter((p) => p.isBot);
+        sim = createSim(track, client.isSpectator ? 0 : bots.length);
         world = createWorld(track, host);
         setStage(track.name);
         setYou(client.me.handle ? `@${client.me.handle}` : "You");
-        setRival(client.opponent ? `@${client.opponent.handle}` : "Pace truck");
+        const meId = client.me.id;
+        const others = client.players.filter((p) => p.id !== meId);
+        setRival(others.length === 1 ? `@${others[0]!.handle}` : `${others.length} trucks`);
         if (!client.isSpectator) setPhase("grid");
-        client.room.on("pose", (payload) => {
+        client.room.on("pose", (payload, from) => {
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
-          const o = payload as { x?: unknown; y?: unknown; z?: unknown; yaw?: unknown; s?: unknown };
+          if (from === client?.me.id) return;
+          const o = payload as { x?: unknown; y?: unknown; z?: unknown; yaw?: unknown; sp?: unknown };
           if (typeof o.x !== "number" || typeof o.y !== "number" || typeof o.z !== "number") return;
-          ghost = {
-            x: o.x,
-            y: o.y,
-            z: o.z,
-            yaw: typeof o.yaw === "number" ? o.yaw : 0,
-            s: typeof o.s === "number" ? o.s : 0,
-          };
+          const yaw = typeof o.yaw === "number" ? o.yaw : 0;
+          const speed = typeof o.sp === "number" ? o.sp : 0;
+          const prev = ghost.get(from);
+          if (!prev) {
+            ghost.set(from, {
+              x: o.x,
+              y: o.y,
+              z: o.z,
+              yaw,
+              steer: 0,
+              speed,
+              tx: o.x,
+              ty: o.y,
+              tz: o.z,
+              tyaw: yaw,
+              seen: performance.now(),
+            });
+            return;
+          }
+          prev.tx = o.x;
+          prev.ty = o.y;
+          prev.tz = o.z;
+          prev.tyaw = yaw;
+          prev.speed = speed;
+          prev.seen = performance.now();
         });
         client.onStart(() => {
           matchGo = true;
@@ -528,7 +581,7 @@ export function MoonRace() {
             <p className="font-display text-xs tracking-wide text-primary sm:text-sm">LUNAR DIRT RALLY</p>
             <h1 className="mt-1 font-display text-4xl leading-none sm:text-5xl">MOON RACE</h1>
             <p className="mt-3 text-sm leading-relaxed text-muted">
-              Cross every gate in order. Blue jugs load into the bed. Lowest time wins.
+              Two to eight trucks. One long stage. Cross every gate. Blue jugs load into the bed. Lowest time wins.
             </p>
             <p className="mt-3 text-sm text-fg">{phase === "boot" ? "Building the stage…" : stage}</p>
             {best != null ? <p className="text-sm text-ghost">Your best {formatTime(best)}</p> : null}

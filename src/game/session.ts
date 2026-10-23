@@ -4,6 +4,7 @@ import { ACHIEVEMENTS, STATS } from "./catalog";
 const MOCK = {
   scoring: "low" as const,
   mode: "practice" as const,
+  players: 4,
   startDelayMs: 180,
   stats: STATS,
   achievements: ACHIEVEMENTS,

@@ -1,6 +1,6 @@
 # Moon Race
 
-A 3D lunar dirt rally for [VibeCade](https://www.vibecade.si). Monster Cybertrucks, one seeded regolith stage, water jugs in the bed. Lowest time wins.
+A 3D lunar dirt rally for [VibeCade](https://www.vibecade.si). Two to eight monster Cybertrucks, one long seeded regolith stage, water jugs in the bed. Lowest time wins.
 
 ## Play
 

@@ -30,6 +30,7 @@ export type Truck = {
   wrongWay: number;
   stuck: number;
   cooldown: number;
+  lane: number;
 };
 
 export type Input = {
@@ -52,7 +53,7 @@ export class KeyInput implements Input {
 export type Sim = {
   track: Track;
   player: Truck;
-  bot: Truck | null;
+  bots: Truck[];
   time: number;
   dnf: boolean;
   taken: Set<number>;
@@ -61,12 +62,12 @@ export type Sim = {
 const GRAV = 5.2;
 const MAX = 32;
 
-function makeTruck(track: Track, s: number): Truck {
+function makeTruck(track: Track, s: number, lane = 0): Truck {
   const sm = sampleAt(track, s);
   return {
-    x: sm.x,
+    x: sm.x + sm.rx * lane * 2.4,
     y: sampleHeight(track.height, sm.x, sm.z),
-    z: sm.z,
+    z: sm.z + sm.rz * lane * 2.4,
     yaw: sm.yaw,
     speed: 0,
     slide: 0,
@@ -93,14 +94,23 @@ function makeTruck(track: Track, s: number): Truck {
     wrongWay: 0,
     stuck: 0,
     cooldown: 0.4,
+    lane,
   };
 }
 
-export function createSim(track: Track, withBot: boolean): Sim {
+const FIELD = 7;
+
+export function createSim(track: Track, botCount: number): Sim {
+  const n = Math.max(0, Math.min(FIELD, botCount));
+  const bots: Truck[] = [];
+  for (let i = 0; i < n; i++) {
+    const lane = (i % 5) - 2;
+    bots.push(makeTruck(track, Math.max(6, 14 - i * 4), lane));
+  }
   return {
     track,
-    player: makeTruck(track, 16),
-    bot: withBot ? makeTruck(track, 16) : null,
+    player: makeTruck(track, 18, 0),
+    bots,
     time: 0,
     dnf: false,
     taken: new Set(),
@@ -167,7 +177,7 @@ function stepBot(track: Track, t: Truck, dt: number, clock: number) {
     t.speed = 0;
   }
   const p = sampleAt(track, t.s);
-  const wobble = Math.sin(t.s * 0.045) * 1.3;
+  const wobble = t.lane * 2.3 + Math.sin(t.s * 0.04 + t.lane) * 0.6;
   const px = t.x;
   const pz = t.z;
   t.x = p.x + p.rx * wobble;
@@ -314,11 +324,11 @@ export function stepSim(sim: Sim, input: Input, dt: number, racing: boolean) {
   const clock = sim.time;
   stepTruck(sim.track, sim.player, input, dt, clock);
   collectJugs(sim);
-  if (sim.bot) stepBot(sim.track, sim.bot, dt, clock);
-  if (!sim.player.finished && sim.time >= 150) {
+  for (const bot of sim.bots) stepBot(sim.track, bot, dt, clock);
+  if (!sim.player.finished && sim.time >= 400) {
     sim.dnf = true;
     sim.player.finished = true;
-    sim.player.finishTime = 150;
+    sim.player.finishTime = 400;
   }
 }
 

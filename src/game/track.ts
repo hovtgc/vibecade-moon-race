@@ -297,7 +297,7 @@ export function buildTrack(seed: string, rng: Random): Track {
   let z = 0;
   let yaw = 0;
   let y = 3;
-  for (let i = 0; i < 26; i++) {
+  for (let i = 0; i < 56; i++) {
     const hairpin = roll.chance(0.16);
     yaw += roll.float(-0.4, 0.4) * (hairpin ? 2.2 : 1);
     const step = roll.float(24, 40);
